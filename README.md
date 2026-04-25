@@ -45,6 +45,48 @@ Supports context types:
 - DECLARATION
 - PARAMETER
 
+### POSTバッチサーバ
+
+複数の識別子をまとめてタグ付けするための POST ベースのバッチサーバも起動できます:
+
+```bash
+./venv/bin/python serve_post_batch.py --port 8091 --protocol http --worker-processes 10 --threads 10
+```
+
+起動後は、次のエンドポイントに POST リクエストを送ります:
+
+```text
+http://127.0.0.1:8091/tag
+```
+
+リクエストボディの例:
+
+```json
+{
+  "functions": ["get_user_name", "validate_input"],
+  "parameters": ["user_id", "max_count"],
+  "variables": ["tmp_result", "cache_map"]
+}
+```
+
+キャッシュに関する補足:
+
+- POST バッチサーバは、メインの HTTP サーバプロセス内で in-memory の LRU cache を使用します。
+- キャッシュキーには `identifier_name`, `context`, `system_name`, `language`, `type` が含まれます。
+- キャッシュはプロセス間で共有されません。worker process 側は、この LRU cache の共有コピーを持ちません。
+- `--cache-size` は、メインプロセス内に保持するキャッシュ件数を制御します。
+
+### 負荷テスト
+
+数字と記号の prefix / suffix を識別子に付けて LRU cache を避けながら、繰り返し POST リクエストを送るには次を使います:
+
+```bash
+scripts/load_test_post_batch.py \
+  --url http://127.0.0.1:8091/tag \
+  --requests 10000 \
+  --concurrency 16
+```
+
 ---
 
 ## Training
