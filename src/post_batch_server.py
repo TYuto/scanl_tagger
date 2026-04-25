@@ -34,6 +34,12 @@ _WARMUP_PAYLOAD = {
     "programming_language": "",
     "data_type": "",
 }
+DEFAULT_MAX_BATCH_SIZE = 10
+
+
+def _iter_chunks(items, chunk_size):
+    for start in range(0, len(items), chunk_size):
+        yield items[start:start + chunk_size]
 
 
 def _parse_device_names(gpus, require_gpu):
@@ -195,11 +201,14 @@ class DeviceWorkerPool:
             )
         return warmed_workers
 
-    def run_batch(self, request_payloads):
+    def run_batches(self, request_payloads, max_batch_size):
         with self._lock:
             self.inflight += 1
         try:
-            return self.executor.submit(_infer_identifier_batch, request_payloads).result()
+            results = []
+            for chunk in _iter_chunks(request_payloads, max_batch_size):
+                results.extend(self.executor.submit(_infer_identifier_batch, chunk).result())
+            return results
         finally:
             with self._lock:
                 self.inflight = max(self.inflight - 1, 0)
@@ -209,11 +218,24 @@ class DeviceWorkerPool:
 
 
 class IdentifierBatchService:
-    def __init__(self, model_path, local=False, cache_size=50000, worker_processes=1, require_gpu=True, gpus=None):
+    def __init__(
+        self,
+        model_path,
+        local=False,
+        cache_size=50000,
+        worker_processes=1,
+        require_gpu=True,
+        gpus=None,
+        max_batch_size=DEFAULT_MAX_BATCH_SIZE,
+    ):
+        if max_batch_size < 1:
+            raise RuntimeError("max_batch_size must be at least 1.")
+
         self.cache = IdentifierLRUCache(cache_size)
         self._shutdown_lock = threading.Lock()
         self._is_shutdown = False
         self.worker_processes = worker_processes
+        self.max_batch_size = max_batch_size
         self.device_names = _parse_device_names(gpus, require_gpu=require_gpu)
         self.worker_assignments = _distribute_workers(worker_processes, self.device_names)
         self.device_pools = [
@@ -232,6 +254,7 @@ class IdentifierBatchService:
             "ready": all(pool.info.get("ready", False) for pool in self.device_pools),
             "devices": [pool.info for pool in self.device_pools],
             "worker_count": sum(pool.info["worker_count"] for pool in self.device_pools),
+            "max_batch_size": self.max_batch_size,
         }
 
     def shutdown(self):
@@ -356,7 +379,10 @@ class IdentifierBatchService:
         miss_results = []
         if miss_payloads:
             selected_pool = self._acquire_pool()
-            miss_results = selected_pool.run_batch(list(miss_payloads.values()))
+            miss_results = selected_pool.run_batches(
+                list(miss_payloads.values()),
+                max_batch_size=self.max_batch_size,
+            )
 
         for key, result in zip(miss_payloads.keys(), miss_results):
             self.cache.put(key, result)
@@ -411,6 +437,7 @@ def start_post_batch_server(
     cache_size=50000,
     worker_processes=1,
     gpus=None,
+    max_batch_size=DEFAULT_MAX_BATCH_SIZE,
     threads=4,
     require_gpu=True,
 ):
@@ -428,6 +455,7 @@ def start_post_batch_server(
         cache_size=cache_size,
         worker_processes=worker_processes,
         gpus=gpus,
+        max_batch_size=max_batch_size,
         require_gpu=require_gpu,
     )
     atexit.register(_SERVICE.shutdown)
@@ -436,6 +464,7 @@ def start_post_batch_server(
     print(f"Waitress threads: {threads}")
     print(f"Inference worker processes: {worker_processes}")
     print(f"Inference devices: {', '.join(_SERVICE.device_names)}")
+    print(f"Max inference batch size: {_SERVICE.max_batch_size}")
     print(f"Warmed inference workers: {_SERVICE.worker_info.get('worker_count', 'unknown')}")
     for pool in _SERVICE.worker_info.get("devices", []):
         print(

@@ -39,6 +39,12 @@ def parse_args():
         help="Optional path to a JSON file overriding the default payload template",
     )
     parser.add_argument(
+        "--repeat-items",
+        type=int,
+        default=1,
+        help="Repeat each list item this many times inside every request payload",
+    )
+    parser.add_argument(
         "--prefix-symbols",
         nargs="+",
         default=DEFAULT_SYMBOLS,
@@ -60,11 +66,29 @@ def parse_args():
 
 def load_payload_template(args):
     if args.payload_json:
-        return json.loads(args.payload_json)
-    if args.payload_file:
+        payload = json.loads(args.payload_json)
+    elif args.payload_file:
         with open(args.payload_file) as handle:
-            return json.load(handle)
-    return json.loads(json.dumps(DEFAULT_PAYLOAD))
+            payload = json.load(handle)
+    else:
+        payload = json.loads(json.dumps(DEFAULT_PAYLOAD))
+
+    if args.repeat_items < 1:
+        raise ValueError("--repeat-items must be at least 1")
+
+    if args.repeat_items == 1:
+        return payload
+
+    repeated_payload = {}
+    for key, value in payload.items():
+        if isinstance(value, list):
+            repeated_items = []
+            for _ in range(args.repeat_items):
+                repeated_items.extend(json.loads(json.dumps(value)))
+            repeated_payload[key] = repeated_items
+        else:
+            repeated_payload[key] = value
+    return repeated_payload
 
 
 def decorate_identifier(name, request_index, item_index, prefix_symbols, suffix_symbols):

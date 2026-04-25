@@ -36,6 +36,12 @@ def parse_args():
         help="Total number of dedicated inference worker processes across all configured devices",
     )
     parser.add_argument(
+        "--max-batch-size",
+        type=int,
+        default=256,
+        help="Maximum number of cache-miss identifiers sent to one model forward",
+    )
+    parser.add_argument(
         "--allow-cpu-fallback",
         action="store_true",
         help="Allow the server to start even if CUDA is unavailable",
@@ -55,5 +61,6 @@ if __name__ == "__main__":
         cache_size=args.cache_size,
         worker_processes=args.worker_processes,
         gpus=args.gpus,
+        max_batch_size=args.max_batch_size,
         require_gpu=not args.allow_cpu_fallback,
     )

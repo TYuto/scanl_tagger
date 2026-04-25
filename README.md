@@ -62,10 +62,13 @@ Supports context types:
   --port 8091 \
   --protocol http \
   --gpus 0,1 \
-  --worker-processes 4
+  --worker-processes 4 \
+  --max-batch-size 256
 ```
 
 `--worker-processes` は全 GPU を合わせた worker 数で、上の例では `cuda:0` と `cuda:1` に worker が分散されます。利用可能な GPU をすべて使いたい場合は `--gpus all` も指定できます。
+
+`--max-batch-size` は、cache miss した識別子を 1 回の model forward に何件までまとめるかを制御します。GPU メモリが足りない場合は、まず `128` や `64` に下げてください。
 
 起動後は、次のエンドポイントに POST リクエストを送ります:
 
