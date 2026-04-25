@@ -173,31 +173,43 @@ class DeviceWorkerPool:
         self.info = {
             "ready": all(item.get("ready", False) for item in self.worker_pool_info),
             "device": device,
-            "worker_count": len(self.worker_pool_info),
+            "worker_count": worker_count,
+            "observed_worker_count": len(self.worker_pool_info),
             "worker_pids": [item["pid"] for item in self.worker_pool_info],
         }
 
     def _warm_all_workers(self):
-        futures = [
-            self.executor.submit(_warm_worker)
-            for _ in range(self.worker_count)
-        ]
-        warmed_workers = []
-        for future in futures:
-            try:
-                warmed_workers.append(future.result())
-            except Exception as exc:
-                raise RuntimeError(
-                    f"Inference worker failed during startup warm-up on {self.device}. "
-                    "This usually points to CUDA/device initialization or first-forward allocation issues. "
-                    f"{type(exc).__name__}: {exc}"
-                ) from exc
+        warmed_by_pid = {}
+        max_rounds = max(self.worker_count * 4, 1)
 
-        unique_pids = {item["pid"] for item in warmed_workers}
-        if len(unique_pids) != self.worker_count:
-            raise RuntimeError(
-                f"Failed to initialize the expected number of inference workers on {self.device}. "
-                f"expected={self.worker_count} actual={len(unique_pids)}"
+        for _ in range(max_rounds):
+            futures = [
+                self.executor.submit(_warm_worker)
+                for _ in range(self.worker_count)
+            ]
+            for future in futures:
+                try:
+                    worker_info = future.result()
+                except Exception as exc:
+                    raise RuntimeError(
+                        f"Inference worker failed during startup warm-up on {self.device}. "
+                        "This usually points to CUDA/device initialization or first-forward allocation issues. "
+                        f"{type(exc).__name__}: {exc}"
+                    ) from exc
+                warmed_by_pid[worker_info["pid"]] = worker_info
+
+            if len(warmed_by_pid) >= self.worker_count:
+                break
+
+        warmed_workers = list(warmed_by_pid.values())
+        if len(warmed_workers) != self.worker_count:
+            logger.warning(
+                "Only observed %s/%s worker processes during warm-up on %s. "
+                "ProcessPoolExecutor does not guarantee one submitted task per worker; "
+                "the remaining workers may still be started lazily.",
+                len(warmed_workers),
+                self.worker_count,
+                self.device,
             )
         return warmed_workers
 
