@@ -38,7 +38,7 @@ def parse_args():
     parser.add_argument(
         "--max-batch-size",
         type=int,
-        default=256,
+        default=10,
         help="Maximum number of cache-miss identifiers sent to one model forward",
     )
     parser.add_argument(
