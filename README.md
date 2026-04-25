@@ -53,6 +53,8 @@ Supports context types:
 ./venv/bin/python serve_post_batch.py --port 8091 --protocol http --worker-processes 10 --threads 10
 ```
 
+GPU で動かす場合は、`--worker-processes` を増やすと同じ GPU にモデルが複数ロードされます。単一 GPU ではまず `--worker-processes 1` から試し、複数 GPU を使いたい場合は後述の `serve_post_batch_multi_gpu.py` を使うのがおすすめです。
+
 起動後は、次のエンドポイントに POST リクエストを送ります:
 
 ```text

@@ -353,6 +353,11 @@ def start_post_batch_multi_gpu_server(
     print(f"Proxy threads: {service.threads}")
     print(f"Visible GPU ids: {', '.join(service.gpu_ids)}")
     print(f"Backend ports: {', '.join(str(backend.port) for backend in service.backends)}")
+    if service.backend_worker_processes > 1:
+        print(
+            "WARNING: backend_worker_processes > 1 loads multiple model copies per GPU backend. "
+            "Start with --backend-worker-processes 1 unless measurements show a clear benefit."
+        )
 
     try:
         serve(
