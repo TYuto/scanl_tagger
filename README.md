@@ -76,6 +76,35 @@ http://127.0.0.1:8091/tag
 - キャッシュはプロセス間で共有されません。worker process 側は、この LRU cache の共有コピーを持ちません。
 - `--cache-size` は、メインプロセス内に保持するキャッシュ件数を制御します。
 
+### マルチGPU起動
+
+1 回の起動で複数 GPU を使いたい場合は、前段のプロキシが GPU ごとに backend サーバを 1 つずつ立ち上げる `serve_post_batch_multi_gpu.py` を使います。
+
+利用可能な GPU を自動で全部使う場合:
+
+```bash
+./venv/bin/python serve_post_batch_multi_gpu.py --port 8091 --protocol http
+```
+
+使う GPU を明示したい場合:
+
+```bash
+./venv/bin/python serve_post_batch_multi_gpu.py \
+  --port 8091 \
+  --protocol http \
+  --gpus 0,1
+```
+
+この起動方法では、各 backend プロセスに対して `CUDA_VISIBLE_DEVICES` を個別に設定し、1 backend = 1 GPU でモデルをロードします。前段のプロキシは、同時に来た HTTP リクエストを空いている backend に振り分けます。
+
+ヘルスチェック:
+
+```text
+http://127.0.0.1:8091/health
+```
+
+実際に処理した backend は、レスポンスヘッダの `X-Backend-GPU` と `X-Backend-Port` で確認できます。
+
 ### 負荷テスト
 
 数字と記号の prefix / suffix を識別子に付けて LRU cache を避けながら、繰り返し POST リクエストを送るには次を使います:
