@@ -25,10 +25,15 @@ def parse_args():
     parser.add_argument("--local", action="store_true", help="Use a local model directory")
     parser.add_argument("--cache-size", type=int, default=50000, help="LRU cache size")
     parser.add_argument(
+        "--gpus",
+        type=str,
+        help="Comma-separated GPU ids like '0,1', or 'all' to use every visible GPU",
+    )
+    parser.add_argument(
         "--worker-processes",
         type=int,
         default=1,
-        help="Number of dedicated inference worker processes; each request is dispatched to one of these workers",
+        help="Total number of dedicated inference worker processes across all configured devices",
     )
     parser.add_argument(
         "--allow-cpu-fallback",
@@ -49,5 +54,6 @@ if __name__ == "__main__":
         local=args.local,
         cache_size=args.cache_size,
         worker_processes=args.worker_processes,
+        gpus=args.gpus,
         require_gpu=not args.allow_cpu_fallback,
     )
