@@ -92,6 +92,7 @@ http://127.0.0.1:8091/tag
 - キャッシュキーには `identifier_name`, `context`, `system_name`, `language`, `type` が含まれます。
 - キャッシュはプロセス間で共有されません。worker process 側は、この LRU cache の共有コピーを持ちません。
 - `--cache-size` は、メインプロセス内に保持するキャッシュ件数を制御します。
+- キャッシュの累積 hit/miss と、直近 60 秒ウィンドウの hit rate は `GET /health` の `cache` フィールドで確認できます。
 
 ### 負荷テスト
 

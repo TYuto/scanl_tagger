@@ -3,6 +3,7 @@ import logging
 import os
 import signal
 import threading
+import time
 from collections import OrderedDict
 from concurrent.futures import ProcessPoolExecutor
 from copy import deepcopy
@@ -35,6 +36,7 @@ _WARMUP_PAYLOAD = {
     "data_type": "",
 }
 DEFAULT_MAX_BATCH_SIZE = 10
+DEFAULT_CACHE_STATS_WINDOW_SECONDS = 60.0
 
 
 def _iter_chunks(items, chunk_size):
@@ -246,6 +248,13 @@ class IdentifierBatchService:
         self.cache = IdentifierLRUCache(cache_size)
         self._shutdown_lock = threading.Lock()
         self._is_shutdown = False
+        self._stats_lock = threading.Lock()
+        self.cache_hits = 0
+        self.cache_misses = 0
+        self.cache_window_hits = 0
+        self.cache_window_misses = 0
+        self.cache_window_started_at = time.monotonic()
+        self.cache_stats_window_seconds = DEFAULT_CACHE_STATS_WINDOW_SECONDS
         self.worker_processes = worker_processes
         self.max_batch_size = max_batch_size
         self.device_names = _parse_device_names(gpus, require_gpu=require_gpu)
@@ -268,6 +277,52 @@ class IdentifierBatchService:
             "worker_count": sum(pool.info["worker_count"] for pool in self.device_pools),
             "max_batch_size": self.max_batch_size,
         }
+
+    def cache_stats(self):
+        with self._stats_lock:
+            hits = self.cache_hits
+            misses = self.cache_misses
+            window_hits = self.cache_window_hits
+            window_misses = self.cache_window_misses
+            window_started_at = self.cache_window_started_at
+
+        total = hits + misses
+        window_total = window_hits + window_misses
+        window_elapsed = time.monotonic() - window_started_at
+        return {
+            "cumulative": {
+                "hits": hits,
+                "misses": misses,
+                "total": total,
+                "hit_rate": round(hits / total, 6) if total else 0.0,
+            },
+            "window": {
+                "seconds": self.cache_stats_window_seconds,
+                "elapsed_seconds": round(window_elapsed, 3),
+                "hits": window_hits,
+                "misses": window_misses,
+                "total": window_total,
+                "hit_rate": round(window_hits / window_total, 6) if window_total else 0.0,
+            },
+            "entries": len(self.cache),
+            "max_entries": self.cache.max_size,
+        }
+
+    def _record_cache_stats(self, hits, misses):
+        with self._stats_lock:
+            now = time.monotonic()
+            if now - self.cache_window_started_at >= self.cache_stats_window_seconds:
+                self.cache_window_hits = 0
+                self.cache_window_misses = 0
+                self.cache_window_started_at = now
+
+            if hits == 0 and misses == 0:
+                return
+
+            self.cache_hits += hits
+            self.cache_misses += misses
+            self.cache_window_hits += hits
+            self.cache_window_misses += misses
 
     def shutdown(self):
         with self._shutdown_lock:
@@ -370,11 +425,13 @@ class IdentifierBatchService:
 
         pending_by_key = {}
         miss_payloads = {}
+        cache_hits = 0
 
         for item in normalized_items:
             key = self._cache_key(item)
             cached = self.cache.get(key)
             if cached is not None:
+                cache_hits += 1
                 grouped_results[item["category"]][item["index"]] = self._response_entry(cached)
                 continue
 
@@ -401,6 +458,8 @@ class IdentifierBatchService:
             for item in pending_by_key[key]:
                 grouped_results[item["category"]][item["index"]] = self._response_entry(result)
 
+        self._record_cache_stats(cache_hits, len(miss_payloads))
+
         return {
             "functions": grouped_results["functions"],
             "parameters": grouped_results["parameters"],
@@ -416,7 +475,7 @@ def health():
     return jsonify({
         "ready": True,
         "worker": _SERVICE.worker_info,
-        "cache_entries": len(_SERVICE.cache),
+        "cache": _SERVICE.cache_stats(),
     })
 
 
